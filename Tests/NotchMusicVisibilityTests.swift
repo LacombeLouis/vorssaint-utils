@@ -112,6 +112,7 @@ enum NotchMusicVisibilityTests {
         var clipboardPinnedOnly = false
         var openedByHover = false
         var sectionQuery = ""
+        var homeTileSizes: [NotchModule: NotchHomeTileSize] = [:]
         var highlightedSection: NotchModule?
         var sectionRow = 0
         var hoverState = NotchHoverState()
@@ -384,6 +385,35 @@ enum NotchMusicVisibilityTests {
         defaults.set("", forKey: DefaultsKey.notchHiddenModules)
         defaults.set("", forKey: DefaultsKey.notchHiddenControls)
         service.modules = NotchSupport.modules(in: defaults)
+        service.selected = .files
+        service.showingSections = true
+        service.showingAppPanel = false
+        service.homeTileSizes = [.timer: .live]
+        service.syncVisibleConsumers()
+        suite.expect(!reader.running, "Home without a wide Now Playing card keeps no on-demand music reader")
+        service.homeTileSizes = [.music: .wide]
+        service.syncVisibleConsumers()
+        suite.expect(reader.running, "Home's wide Now Playing card keeps the music reader running")
+        service.sectionQuery = "files"
+        service.syncVisibleConsumers()
+        suite.expect(!reader.running, "searching Home hides the wide card and releases the music reader")
+        service.sectionQuery = ""
+        service.showingAppPanel = true
+        service.syncVisibleConsumers()
+        suite.expect(reader.running, "Home opened over the app panel still shows the wide card, so its music reader keeps running")
+        service.showingCommandBar = true
+        service.syncVisibleConsumers()
+        suite.expect(!reader.running, "the command bar over Home hides the wide card and releases the music reader")
+        service.showingCommandBar = false
+        service.showingAppPanel = false
+        service.modules = service.modules.filter { $0 != .music }
+        service.syncVisibleConsumers()
+        suite.expect(!reader.running, "a hidden Music page keeps no reader for a wide card it cannot show")
+        service.modules = NotchSupport.modules(in: defaults)
+        service.homeTileSizes = [:]
+        service.showingSections = false
+        service.selected = .controls
+        service.syncVisibleConsumers()
         service.collapse()
         service.hasTimerActivity = true
         service.hasDownloadActivity = true

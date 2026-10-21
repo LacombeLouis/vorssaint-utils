@@ -300,7 +300,9 @@ enum NotchCapsuleTests {
                             == CGRect(origin: .zero, size: strip),
                          "a click anywhere on a closed capsule opens the island")
             let sizes = NotchModule.allCases.map { geometry.expandedSize(module: $0) }
-                + [geometry.sectionPickerSize(count: NotchModule.allCases.count), geometry.peek,
+                + [geometry.sectionPickerSize(
+                    rowCount: NotchSectionPaging.rows(count: NotchModule.allCases.count, columns: geometry.sectionColumns)),
+                   geometry.peek,
                    geometry.notificationPreviewSize(contentHeight: 120)]
             for size in sizes {
                 let capsule = body(size, geometry)

@@ -485,7 +485,7 @@ struct NotchActionTile: View {
 /// A running timer, focus cycle or stopwatch keeps its clock on the tile:
 /// opening the island covers the reading the closed island showed, and a
 /// countdown hidden from the closed island can still be read here.
-private struct NotchTimerTile: View {
+struct NotchTimerTile: View {
     let service: NotchService
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var l10n = L10n.shared
@@ -524,7 +524,7 @@ private struct NotchTimerTile: View {
 
 /// The next appointment's start and title, so the week's agenda is a click
 /// away rather than the only way to see what comes next.
-private struct NotchCalendarTile: View {
+struct NotchCalendarTile: View {
     let service: NotchService
     @ObservedObject private var calendar = NotchCalendarService.shared
     @ObservedObject private var l10n = L10n.shared

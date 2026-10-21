@@ -914,6 +914,9 @@ enum DefaultsKey {
     static let notchOpensActivity = "notchOpensActivity"
     static let notchHiddenModules = "notchHiddenModules"
     static let notchModuleOrder = "notchModuleOrder"
+    /// Home's tile sizes as comma-joined `page:size` pairs; a page not listed
+    /// shows as an icon.
+    static let notchHomeTileSizes = "notchHomeTileSizes"
     static let notchQuickAccessLayout = "notchQuickAccessLayout"
     static let notchQuickAccessSide = "notchQuickAccessSide"
     static let notchQuickAccessSecond = "notchQuickAccessSecond"
@@ -1510,6 +1513,7 @@ enum Defaults {
         DefaultsKey.notchOpensActivity: true,
         DefaultsKey.notchHiddenModules: "",
         DefaultsKey.notchModuleOrder: "",
+        DefaultsKey.notchHomeTileSizes: "",
         DefaultsKey.notchQuickAccessLayout: Data(),
         DefaultsKey.notchVolume: true,
         DefaultsKey.notchInputSource: true,

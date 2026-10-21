@@ -3,8 +3,10 @@
 
 import SwiftUI
 
-/// An in-place destination gallery. It only observes navigation, never the
-/// contents or services of the sections represented by its buttons.
+/// An in-place destination gallery that doubles as the island's home: each
+/// page as an icon, a live tile or a wide card, in rows that step whole. It only
+/// observes navigation, never the contents or services of the sections
+/// represented by its buttons; a live tile brings its own.
 ///
 /// Rows step in whole, so the grid always rests on a row boundary; a dot per
 /// resting position shows where it is and that more rows follow. Rows that
@@ -36,22 +38,25 @@ struct NotchSectionsView: View {
 
     private var gallery: some View {
         let columns = service.geometry.sectionColumns
-        let rows = NotchSectionPaging.rows(count: sections.count, columns: columns)
-        let visible = service.geometry.sectionRows(count: sections.count)
+        let homeRows = service.homeRows
+        let rows = homeRows.count
+        let visible = service.geometry.sectionRows(rowCount: rows)
         let positions = NotchSectionPaging.positions(rows: rows, visible: visible)
         let first = NotchSectionPaging.clamped(service.sectionRow, rows: rows, visible: visible)
         let shown = first..<(first + visible)
         return HStack(spacing: 0) {
             VStack(spacing: NotchLayout.sectionSpacing) {
                 ForEach(0..<rows, id: \.self) { row in
+                    let items = homeRows[row]
                     HStack(spacing: NotchLayout.sectionSpacing) {
-                        ForEach(0..<columns, id: \.self) { column in
-                            let index = row * columns + column
-                            if index < sections.count {
-                                tile(sections[index], visible: shown.contains(row))
-                            } else {
-                                Color.clear.frame(maxWidth: .infinity).frame(height: NotchLayout.sectionTileHeight)
-                            }
+                        ForEach(items, id: \.module) { item in
+                            tile(item, visible: shown.contains(row))
+                        }
+                        // Every size spans one column or the whole row, so
+                        // flexible frames share a row correctly.
+                        ForEach(0..<max(0, columns - items.reduce(0) { $0 + $1.size.span(columns: columns) }),
+                                id: \.self) { _ in
+                            Color.clear.frame(maxWidth: .infinity).frame(height: NotchLayout.sectionTileHeight)
                         }
                     }
                     .allowsHitTesting(shown.contains(row))
@@ -97,7 +102,19 @@ struct NotchSectionsView: View {
         }
     }
 
-    private func tile(_ module: NotchModule, visible: Bool) -> some View {
+    @ViewBuilder private func tile(_ item: NotchHomeItem, visible: Bool) -> some View {
+        Group {
+            switch item.size {
+            case .icon:
+                iconTile(item.module, visible: visible)
+            case .live, .wide:
+                NotchHomeTile(service: service, item: item, highlighted: service.highlightedSection == item.module)
+            }
+        }
+        .modifier(NotchHomeTileMenus(service: service, item: item, enabled: service.sectionQuery.isEmpty))
+    }
+
+    private func iconTile(_ module: NotchModule, visible: Bool) -> some View {
         let highlighted = service.highlightedSection == module
         let current = service.selected == module
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)

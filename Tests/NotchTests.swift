@@ -1147,7 +1147,8 @@ enum NotchTests {
                     let sizes = [geometry.restingSize(showsContent: false), geometry.collapsed, geometry.peek,
                                  geometry.notice, geometry.noticeSize(wingWidth: 190)]
                         + NotchModule.allCases.map { geometry.expandedSize(module: $0) }
-                        + [geometry.sectionPickerSize(count: NotchModule.allCases.count)]
+                        + [geometry.sectionPickerSize(
+                            rowCount: NotchSectionPaging.rows(count: NotchModule.allCases.count, columns: geometry.sectionColumns))]
                     for size in sizes {
                         let positioned = geometry.frame(for: size)
                         suite.expect(screen.contains(positioned) && positioned.midX == screen.midX
@@ -1731,6 +1732,7 @@ enum NotchTests {
         NotchNotificationReaderTests.run(suite)
         NotchGestureTests.run(suite)
         NotchSectionPagingTests.run(suite)
+        NotchHomeTests.run(suite)
         NotchKeyboardLightTests.run(suite)
         NotchActivityTests.run(suite)
         NotchWatchTests.run(suite)
@@ -2647,19 +2649,29 @@ enum NotchTests {
         let compact = NotchGeometry(screen: frames[0], safeAreaTop: 32, cameraWidth: 210)
         let spacious = NotchGeometry(screen: frames[0], safeAreaTop: 32, cameraWidth: 210, layout: .spacious)
         let tall = NotchGeometry(screen: frames[0], safeAreaTop: 32, cameraWidth: 210, layout: .custom, customHeight: 640)
+        // A gallery of `count` tiles, as the island sizes it: none is an empty one.
+        func galleryRows(_ geometry: NotchGeometry, _ count: Int) -> Int {
+            count == 0 ? 0 : NotchSectionPaging.rows(count: count, columns: geometry.sectionColumns)
+        }
+        func sectionRows(_ geometry: NotchGeometry, _ count: Int) -> Int {
+            geometry.sectionRows(rowCount: galleryRows(geometry, count))
+        }
+        func sectionPicker(_ geometry: NotchGeometry, _ count: Int) -> CGSize {
+            geometry.sectionPickerSize(rowCount: galleryRows(geometry, count))
+        }
         for geometry in [compact, spacious, tall] {
-            suite.expect(geometry.sectionPickerSize(count: 1).height < geometry.sectionPickerSize(count: allModules.count).height,
+            suite.expect(sectionPicker(geometry, 1).height < sectionPicker(geometry, allModules.count).height,
                    "a short search result shrinks the gallery instead of reserving empty rows")
         }
-        suite.expect(compact.sectionRows(count: allModules.count) == 3 && spacious.sectionRows(count: allModules.count) == 3
-               && compact.contentSize(for: compact.sectionPickerSize(count: allModules.count)).height <= compact.pageBudget
-               && tall.sectionRows(count: allModules.count) > spacious.sectionRows(count: allModules.count)
-               && tall.sectionRows(count: allModules.count)
+        suite.expect(sectionRows(compact, allModules.count) == 3 && sectionRows(spacious, allModules.count) == 3
+               && compact.contentSize(for: sectionPicker(compact, allModules.count)).height <= compact.pageBudget
+               && sectionRows(tall, allModules.count) > sectionRows(spacious, allModules.count)
+               && sectionRows(tall, allModules.count)
                    <= NotchSectionPaging.rows(count: allModules.count, columns: tall.sectionColumns),
                "the gallery is a page: presets show three whole rows and a tall island shows more")
         suite.expect(compact.sectionColumns == 4 && spacious.sectionColumns == 5
-               && compact.sectionColumns * compact.sectionRows(count: allModules.count) < allModules.count
-               && spacious.sectionColumns * (spacious.sectionRows(count: allModules.count) + 1) >= allModules.count,
+               && compact.sectionColumns * sectionRows(compact, allModules.count) < allModules.count
+               && spacious.sectionColumns * (sectionRows(spacious, allModules.count) + 1) >= allModules.count,
                "a compact island steps rows to reach its last sections and a spacious one steps at most one")
         suite.expect(NotchLayout.sectionTileHeight * 2 + NotchLayout.sectionSpacing <= NotchLayout.compactContentHeight
                && NotchLayout.sectionTileHeight * 3 + NotchLayout.sectionSpacing * 2 <= NotchLayout.pageContentHeight,
@@ -2684,8 +2696,8 @@ enum NotchTests {
                    && ratio > 4.0 / 3.0 - 0.001 && ratio < 16.0 / 9.0 + 0.001,
                    "camera preview fills the page's width or height and crops no further than 16:9 or 4:3")
         }
-        suite.expect(compact.contentSize(for: compact.sectionPickerSize(count: 0)).height == NotchLayout.emptyHeight
-               && compact.contentSize(for: compact.sectionPickerSize(count: 1)).height == NotchLayout.sectionTileHeight,
+        suite.expect(compact.contentSize(for: sectionPicker(compact, 0)).height == NotchLayout.emptyHeight
+               && compact.contentSize(for: sectionPicker(compact, 1)).height == NotchLayout.sectionTileHeight,
                "an unmatched search keeps the recovery guidance's row and a match takes just its tiles, the search living in the header")
         for layout in NotchSize.allCases {
             let geometry = NotchGeometry(screen: frames[0], safeAreaTop: 32, cameraWidth: 210, layout: layout)
@@ -2786,7 +2798,8 @@ enum NotchTests {
                                "every page keeps inside the custom budget")
                     }
                     for count in [0, 1, 9, allModules.count] {
-                        let picker = custom.sectionPickerSize(count: count)
+                        let picker = custom.sectionPickerSize(
+                            rowCount: count == 0 ? 0 : NotchSectionPaging.rows(count: count, columns: custom.sectionColumns))
                         suite.expect(picker.width == custom.expandedWidth && picker.height <= height
                                && frame.contains(custom.frame(for: picker)),
                                "gallery dimensions respect the display and the user's height limit at every item count")

@@ -56,6 +56,18 @@ enum NotchModule: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The sizes Home can show this page at, the icon first. A size is only
+    /// offered where a view already draws the page at it.
+    var homeSizes: [NotchHomeTileSize] {
+        switch self {
+        case .music: return [.icon, .wide]
+        case .timer, .calendar: return [.icon, .live]
+        case .controls, .mixer, .clipboard, .captures, .files, .system, .tools, .notifications,
+             .camera, .downloads, .scratchpad, .agents, .watch:
+            return [.icon]
+        }
+    }
+
     func isAvailable(in defaults: UserDefaults = .standard) -> Bool {
         switch self {
         case .controls, .music: return true
@@ -81,6 +93,84 @@ enum NotchModule: String, CaseIterable, Identifiable {
                     .monitorDisk, .monitorPower, .fanControl, .connectedDevices].contains { (feature: AppFeature) in
                 feature.isAvailable(in: defaults)
             }
+        }
+    }
+}
+
+/// How a page shows on Home: its gallery tile, the live tile the Controls
+/// rail already draws, or a card across the whole row.
+enum NotchHomeTileSize: String, CaseIterable {
+    case icon, live, wide
+
+    /// Columns taken in a row of `columns`.
+    func span(columns: Int) -> Int { self == .wide ? max(1, columns) : 1 }
+}
+
+/// A page on Home at the size it shows.
+struct NotchHomeItem: Hashable {
+    let module: NotchModule
+    let size: NotchHomeTileSize
+}
+
+/// Home's rows, first fit: each item takes the first row with room for its
+/// span, so a wide card never leaves a hole beside it and the order
+/// otherwise holds. With every item an icon this is the gallery's
+/// row-major grid.
+enum NotchHomeLayout {
+    static func rows(_ items: [NotchHomeItem], columns: Int) -> [[NotchHomeItem]] {
+        let columns = max(1, columns)
+        var rows: [[NotchHomeItem]] = []
+        var used: [Int] = []
+        for item in items {
+            let span = item.size.span(columns: columns)
+            if let index = used.firstIndex(where: { $0 + span <= columns }) {
+                rows[index].append(item)
+                used[index] += span
+            } else {
+                rows.append([item])
+                used.append(span)
+            }
+        }
+        return rows
+    }
+
+    static func row(of module: NotchModule, in rows: [[NotchHomeItem]]) -> Int? {
+        rows.firstIndex { $0.contains { $0.module == module } }
+    }
+
+    /// The arrow keys move over the arranged grid without wrapping, as on
+    /// the quick panel's. Left and right step along the row; up and down
+    /// land on the item in the next row that shares a column, the one whose
+    /// centre is nearest and the lefter when two are as near. With none, as
+    /// under a short last row, the highlight stays. A first press, or one
+    /// after the highlighted page left the grid, moves from the first item.
+    static func adjacent(to module: NotchModule?, in rows: [[NotchHomeItem]], columns: Int,
+                         direction: QuickToolsSupport.GridDirection) -> NotchModule? {
+        guard let first = rows.first?.first else { return nil }
+        let module = module.flatMap { row(of: $0, in: rows) != nil ? $0 : nil } ?? first.module
+        guard let rowIndex = row(of: module, in: rows),
+              let index = rows[rowIndex].firstIndex(where: { $0.module == module }) else { return first.module }
+        let current = rows[rowIndex]
+        switch direction {
+        case .left: return current[max(0, index - 1)].module
+        case .right: return current[min(current.count - 1, index + 1)].module
+        case .up, .down:
+            let target = direction == .up ? rowIndex - 1 : rowIndex + 1
+            guard rows.indices.contains(target) else { return module }
+            let here = placements(of: current, columns: columns)[index]
+            let sharing = zip(rows[target], placements(of: rows[target], columns: columns))
+                .filter { $0.1.start < here.end && here.start < $0.1.end }
+            return sharing.min { abs($0.1.centre - here.centre) < abs($1.1.centre - here.centre) }?.0.module ?? module
+        }
+    }
+
+    /// Where each item of a row sits across its columns.
+    private static func placements(of row: [NotchHomeItem], columns: Int) -> [(start: Int, end: Int, centre: Double)] {
+        var start = 0
+        return row.map { item in
+            let span = item.size.span(columns: columns)
+            defer { start += span }
+            return (start, start + span, Double(start) + Double(span) / 2)
         }
     }
 }
@@ -1854,6 +1944,51 @@ enum NotchSupport {
         }
     }
 
+    /// The size each page shows at on Home. A page that is not listed, or
+    /// whose stored size it does not offer, is left out and shows as an icon;
+    /// the first usable entry for a page wins.
+    static func homeTileSizes(_ stored: String? = UserDefaults.standard.string(forKey: DefaultsKey.notchHomeTileSizes))
+        -> [NotchModule: NotchHomeTileSize] {
+        var sizes: [NotchModule: NotchHomeTileSize] = [:]
+        for entry in (stored ?? "").split(separator: ",") {
+            let parts = entry.split(separator: ":", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard parts.count == 2, let module = NotchModule(rawValue: parts[0]),
+                  let size = NotchHomeTileSize(rawValue: parts[1]),
+                  size != .icon, module.homeSizes.contains(size), sizes[module] == nil
+            else { continue }
+            sizes[module] = size
+        }
+        return sizes
+    }
+
+    /// The stored form of `homeTileSizes`, in the pages' own order.
+    static func homeTileSizesValue(_ sizes: [NotchModule: NotchHomeTileSize]) -> String {
+        NotchModule.allCases.compactMap { module in
+            guard let size = sizes[module], size != .icon, module.homeSizes.contains(size) else { return nil }
+            return "\(module.rawValue):\(size.rawValue)"
+        }.joined(separator: ",")
+    }
+
+    /// The pages in their order, each at its size; one the page does not
+    /// offer shows as an icon.
+    static func homeItems(_ modules: [NotchModule], sizes: [NotchModule: NotchHomeTileSize]) -> [NotchHomeItem] {
+        modules.map { module in
+            let size = sizes[module] ?? .icon
+            return NotchHomeItem(module: module, size: module.homeSizes.contains(size) ? size : .icon)
+        }
+    }
+
+    /// The page order with `module` first. Every other stored id keeps its
+    /// place, unknown ones included; with nothing stored the pages' own order
+    /// is the starting point.
+    static func movingToStart(_ module: NotchModule, order stored: String) -> String {
+        var ids = stored.split(separator: ",").map(String.init)
+        if ids.isEmpty { ids = NotchModule.allCases.map(\.rawValue) }
+        ids.removeAll { $0 == module.rawValue }
+        return ([module.rawValue] + ids).joined(separator: ",")
+    }
+
     static func watchesMusicActivity(in defaults: UserDefaults = .standard) -> Bool {
         let choice = idleContent(in: defaults)
         // The companion can occupy an otherwise empty resting island. Keep
@@ -2783,17 +2918,19 @@ struct NotchGeometry: Equatable {
                                  spacing: NotchLayout.sectionSpacing)
     }
 
-    /// Visible rows. The gallery is a page like the app panel, so a preset
-    /// shows three rows before any row has to step in; the rest step in whole.
-    func sectionRows(count: Int) -> Int {
-        NotchLayout.railRows(count: count,
-                             perRow: sectionColumns,
+    /// Visible rows of a gallery with `rowCount` rows. The gallery is a page
+    /// like the app panel, so a preset shows three rows before any row has to
+    /// step in; the rest step in whole.
+    func sectionRows(rowCount: Int) -> Int {
+        NotchLayout.railRows(count: rowCount,
+                             perRow: 1,
                              rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing, height: pageBudget)
     }
 
-    func sectionPickerSize(count: Int) -> CGSize {
-        let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
-            : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
+    /// The window for a gallery of `rowCount` rows; none is an empty one.
+    func sectionPickerSize(rowCount: Int) -> CGSize {
+        let content = min(pageBudget, rowCount == 0 ? NotchLayout.emptyHeight
+            : NotchLayout.railHeight(rows: sectionRows(rowCount: rowCount), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
         let desiredHeight = headerTopInset + headerChromeHeight + content
         return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
     }

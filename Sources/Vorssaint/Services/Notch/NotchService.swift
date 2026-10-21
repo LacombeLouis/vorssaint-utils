@@ -222,6 +222,8 @@ final class NotchService: ObservableObject {
     /// The home page's controls as the preferences last saved them, read with
     /// the preferences: the open page's geometry is read on every layout pass.
     private var homeControls: [NotchControlItem] = []
+    /// The size each page shows at on Home; a page not listed shows as an icon.
+    @Published private(set) var homeTileSizes: [NotchModule: NotchHomeTileSize] = [:]
     private var fileInteractionActive = false
     private var keepsWorkingSurface: Bool {
         pinned || trackingMenu || NSApp.modalWindow != nil || panel?.attachedSheet != nil
@@ -777,7 +779,7 @@ final class NotchService: ObservableObject {
 
     var expandedSize: CGSize {
         if showingSections {
-            return geometry.sectionPickerSize(count: filteredSections.count)
+            return geometry.sectionPickerSize(rowCount: homeRows.count)
         }
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
         let launcher = QuickLauncherService.shared
@@ -1129,6 +1131,8 @@ final class NotchService: ObservableObject {
         guard screenIndex(in: NSScreen.screens) != nil else { withdrawFromMissingScreen(); return }
         refreshModules()
         homeControls = NotchSupport.controls()
+        let tileSizes = NotchSupport.homeTileSizes()
+        if homeTileSizes != tileSizes { homeTileSizes = tileSizes }
         NotchDownloadService.shared.syncWithPreferences()
         NotchCalendarService.shared.syncWithPreferences()
         NotchNotificationService.shared.syncWithPreferences()
@@ -1715,12 +1719,44 @@ final class NotchService: ObservableObject {
         }
     }
 
+    /// Home's rows as the gallery draws them; search results are plain icons.
+    var homeRows: [[NotchHomeItem]] {
+        let items = sectionQuery.isEmpty
+            ? NotchSupport.homeItems(filteredSections, sizes: homeTileSizes)
+            : filteredSections.map { NotchHomeItem(module: $0, size: .icon) }
+        return NotchHomeLayout.rows(items, columns: geometry.sectionColumns)
+    }
+
     func searchSections(_ query: String) {
         guard sectionQuery != query else { return }
         mutatePresentation {
             sectionQuery = query
             highlightedSection = filteredSections.first
         }
+        // The wide Now Playing card shows only while nothing is typed.
+        syncVisibleConsumers()
+    }
+
+    /// Show `module` at `size` on Home. A size the page does not offer is ignored.
+    func setHomeTileSize(_ size: NotchHomeTileSize, for module: NotchModule) {
+        guard module.homeSizes.contains(size) else { return }
+        var sizes = homeTileSizes
+        sizes[module] = size == .icon ? nil : size
+        guard sizes != homeTileSizes else { return }
+        mutatePresentation { homeTileSizes = sizes }
+        UserDefaults.standard.set(NotchSupport.homeTileSizesValue(sizes), forKey: DefaultsKey.notchHomeTileSizes)
+        revealHighlightedSection()
+        syncVisibleConsumers()
+    }
+
+    /// Put `module` first on Home. The Settings list reads the same order.
+    func moveHomeItemToStart(_ module: NotchModule) {
+        guard modules.contains(module), modules.first != module else { return }
+        let order = UserDefaults.standard.string(forKey: DefaultsKey.notchModuleOrder) ?? ""
+        UserDefaults.standard.set(NotchSupport.movingToStart(module, order: order), forKey: DefaultsKey.notchModuleOrder)
+        mutatePresentation { refreshModules() }
+        // The moved tile keeps the highlight, which brings its row into view.
+        highlightedSection = module
     }
 
     func toggleSections() {
@@ -1738,17 +1774,17 @@ final class NotchService: ObservableObject {
     }
 
     private var sectionRowLimits: (rows: Int, visible: Int) {
-        let count = filteredSections.count
-        return (NotchSectionPaging.rows(count: count, columns: geometry.sectionColumns), geometry.sectionRows(count: count))
+        let count = homeRows.count
+        return (max(1, count), geometry.sectionRows(rowCount: count))
     }
 
     /// Keyboard moves and search results keep the highlighted tile's row in
     /// view, moving the gallery no further than that row needs.
     private func revealHighlightedSection() {
-        guard let target = highlightedSection, let index = filteredSections.firstIndex(of: target) else { return }
+        let rows = homeRows
+        guard let target = highlightedSection, let index = NotchHomeLayout.row(of: target, in: rows) else { return }
         let limits = sectionRowLimits
-        let row = NotchSectionPaging.revealing(row: index / max(1, geometry.sectionColumns), first: sectionRow,
-                                               rows: limits.rows, visible: limits.visible)
+        let row = NotchSectionPaging.revealing(row: index, first: sectionRow, rows: limits.rows, visible: limits.visible)
         if row != sectionRow { sectionRow = row }
     }
 
@@ -1768,7 +1804,9 @@ final class NotchService: ObservableObject {
               (panel?.firstResponder as? NSTextView)?.hasMarkedText() != true else { return false }
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if event.keyCode == 48, modifiers.isEmpty || modifiers == .shift {
-            highlightedSection = NotchSupport.adjacentModule(to: highlightedSection, modules: filteredSections,
+            // Tab reads the arranged rows, so a wide card sits where it draws.
+            highlightedSection = NotchSupport.adjacentModule(to: highlightedSection,
+                                                             modules: homeRows.flatMap { $0.map(\.module) },
                                                              backwards: modifiers == .shift)
             return true
         }
@@ -1794,10 +1832,8 @@ final class NotchService: ObservableObject {
                                                              backwards: direction == .up)
             return true
         }
-        let index = highlightedSection.flatMap { sections.firstIndex(of: $0) } ?? 0
-        highlightedSection = sections[QuickToolsSupport.gridIndex(after: index, count: sections.count,
-                                                                   flow: .rows(columns: geometry.sectionColumns),
-                                                                   direction: direction)]
+        highlightedSection = NotchHomeLayout.adjacent(to: highlightedSection, in: homeRows,
+                                                      columns: geometry.sectionColumns, direction: direction)
         return true
     }
 
@@ -4250,8 +4286,11 @@ final class NotchService: ObservableObject {
             appPanel: showingAppPanel, captureControls: captureControls != nil) {
             CameraPreviewService.shared.hideEmbedded()
         }
+        // Home draws over the app panel, so only the command bar hides its card.
+        let homeShowsMusic = expanded && showingSections && sectionQuery.isEmpty && homeTileSizes[.music] == .wide
+            && !showingCommandBar
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
-            && !showingAppPanel && !showingSections && !showingCommandBar)
+            && !showingAppPanel && !showingSections && !showingCommandBar) || homeShowsMusic
             || ((!hiddenUntilHover || NotchSupport.hiddenShowsActivity())
                 && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
         if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
