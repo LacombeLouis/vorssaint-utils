@@ -420,8 +420,12 @@ struct NotchActionTile: View {
     var compactTitle: String?
     var active = false
     var accent: NotchTileAccent = .selection
+    /// Fills an Explore cell rather than a rail slot: the cell's height and
+    /// corners, so the hover wash matches the tile, and no lift.
+    var fillsGalleryCell = false
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var cornerRadius: CGFloat { fillsGalleryCell ? 16 : 14 }
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
@@ -437,11 +441,11 @@ struct NotchActionTile: View {
             }
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity)
-            .frame(height: NotchLayout.shortcutHeight)
+            .frame(height: fillsGalleryCell ? NotchLayout.sectionTileHeight : NotchLayout.shortcutHeight)
             .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: active)
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
         }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 14))
+        .buttonStyle(NotchButtonStyle(cornerRadius: cornerRadius, lifts: !fillsGalleryCell))
         .accessibilityLabel(title)
         .accessibilityValue(reading ?? "")
         .accessibilityAddTraits(active ? .isSelected : [])
@@ -487,6 +491,7 @@ struct NotchActionTile: View {
 /// countdown hidden from the closed island can still be read here.
 struct NotchTimerTile: View {
     let service: NotchService
+    var fillsGalleryCell = false
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var l10n = L10n.shared
 
@@ -511,7 +516,7 @@ struct NotchTimerTile: View {
             // A long phase name, such as a Russian short break, would be cut
             // off on a narrow tile; the module's own title stands in.
             compactTitle: active ? NotchControlItem.timer.title(l10n) : nil,
-            active: active, accent: .timer) { service.select(.timer) }
+            active: active, accent: .timer, fillsGalleryCell: fillsGalleryCell) { service.select(.timer) }
     }
 
     /// The compact strip's marks, without the circle the tile already draws.
@@ -526,6 +531,7 @@ struct NotchTimerTile: View {
 /// away rather than the only way to see what comes next.
 struct NotchCalendarTile: View {
     let service: NotchService
+    var fillsGalleryCell = false
     @ObservedObject private var calendar = NotchCalendarService.shared
     @ObservedObject private var l10n = L10n.shared
 
@@ -542,7 +548,7 @@ struct NotchCalendarTile: View {
                 ?? NotchControlItem.calendar.title(l10n),
             reading: event.map {
                 NotchCalendarSupport.tileStartText($0.start, now: now, locale: l10n.language.formattingLocale())
-            }) { service.select(.calendar) }
+            }, fillsGalleryCell: fillsGalleryCell) { service.select(.calendar) }
     }
 }
 

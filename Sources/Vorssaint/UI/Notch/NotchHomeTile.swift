@@ -21,7 +21,9 @@ struct NotchHomeTile: View {
                 if item.size == .live { shape.fill(.white.opacity(0.045)) }
             }
             .overlay {
-                shape.strokeBorder(.white.opacity(highlighted ? 0.55 : contrast == .increased ? 0.4 : 0), lineWidth: 1)
+                // A live tile keeps the faint edge the icons beside it have.
+                shape.strokeBorder(.white.opacity(highlighted ? 0.55 : contrast == .increased ? 0.4
+                                                  : item.size == .live ? 0.04 : 0), lineWidth: 1)
                     .allowsHitTesting(false)
             }
             .accessibilityIdentifier("notch.home.\(item.module.rawValue)")
@@ -30,8 +32,8 @@ struct NotchHomeTile: View {
     @ViewBuilder private var content: some View {
         switch (item.module, item.size) {
         case (.music, .wide): NotchMusicControlsView(notch: service, height: NotchLayout.sectionTileHeight)
-        case (.timer, .live): NotchTimerTile(service: service)
-        case (.calendar, .live): NotchCalendarTile(service: service)
+        case (.timer, .live): NotchTimerTile(service: service, fillsGalleryCell: true)
+        case (.calendar, .live): NotchCalendarTile(service: service, fillsGalleryCell: true)
         // `homeItems` never yields another pairing.
         default: EmptyView()
         }
@@ -99,7 +101,8 @@ struct NotchHomeTileMenus: ViewModifier {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 20, height: 20)
-                            .background(.white.opacity(0.16), in: Circle())
+                            // Opaque, so it covers the current page's checkmark.
+                            .background(Color(white: 0.27), in: Circle())
                     }
                     .menuStyle(.button)
                     .buttonStyle(.plain)
